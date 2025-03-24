@@ -9,7 +9,7 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     env:
-      TARGET_GIT_URL: http://${{ secrets.TARGET_GIT_USERNAME }}:${{ secrets.TARGET_GIT_PASSWORD }}@icloud630.myqnapcloud.com:3000/username/repo.git
+      TARGET_GIT_URL: http://${{ secrets.TARGET_GIT_USERNAME }}:${{ secrets.TARGET_GIT_PASSWORD }}@${{ secrets.TARGET_GIT_URL }}
     steps:
       - name: Checkout source code
         uses: actions/checkout@v3
@@ -23,7 +23,7 @@ jobs:
 
       - name: Add target repository
         run: |
-          git remote add target ${{ secrets.TARGET_GIT_URL }}
+          git remote add target "$TARGET_GIT_URL"
 
       - name: Push to target repository
         env:
