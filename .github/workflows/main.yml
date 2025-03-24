@@ -20,7 +20,7 @@ jobs:
 
       - name: Add target repository
         run: |
-          git remote add target http://${{ secrets.TARGET_GIT_USERNAME }}:${{ secrets.TARGET_GIT_PASSWORD }}icloud630.myqnapcloud.com:3000/ethan021/Deep-Live-Cam.git
+          git remote add target http://${{ secrets.TARGET_GIT_USERNAME }}:${{ secrets.TARGET_GIT_PASSWORD }}@icloud630.myqnapcloud.com:3000/ethan021/Deep-Live-Cam.git
 
       - name: Push to target repository
         env:
