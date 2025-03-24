@@ -1,17 +1,30 @@
-name: "test"
+name: Sync to Target Git Repository
+
 on:
   push:
+    branches:
+      - main  # 触发同步的分支
 
 jobs:
-  test:
+  sync:
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
-        ref: main
-    - uses: ayr-ton/git-deploy-action@v1.1
-      with:
-        ssh_private_key: ${{ secrets.ICLOUD630 }}
-        target_repo_url: http://icloud630.myqnapcloud.com:3000/ethan021/Deep-Live-Cam.git
-        target_branch: main
+      - name: Checkout source code
+        uses: actions/checkout@v3
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Add target repository
+        run: |
+          git remote add target ${{ secrets.TARGET_GIT_URL }}
+
+      - name: Push to target repository
+        env:
+          TARGET_GIT_USERNAME: ${{ secrets.TARGET_GIT_USERNAME }}
+          TARGET_GIT_PASSWORD: ${{ secrets.TARGET_GIT_PASSWORD }}
+        run: |
+          git push target main --force-with-lease
