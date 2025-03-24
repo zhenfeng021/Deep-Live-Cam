@@ -1,9 +1,17 @@
-- uses: actions/checkout@v3
-  with:
-    fetch-depth: 0
-    ref: main
-- uses: ayr-ton/git-deploy-action@v1.1
-  with:
-    ssh_private_key: SHA256:VFyIB7zV/4Cg11MO40/7Q5ugjyviwsJQPPw71Dgirhw
-    target_repo_url: http://icloud630.myqnapcloud.com:3000/ethan021/Deep-Live-Cam.git
-    target_branch: master
+name: "test"
+on:
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+        ref: main
+    - uses: ayr-ton/git-deploy-action@v1.1
+      with:
+        ssh_private_key: SHA256:VFyIB7zV/4Cg11MO40/7Q5ugjyviwsJQPPw71Dgirhw
+        target_repo_url: http://icloud630.myqnapcloud.com:3000/ethan021/Deep-Live-Cam.git
+        target_branch: master
