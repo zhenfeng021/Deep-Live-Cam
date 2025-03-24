@@ -17,7 +17,7 @@ jobs:
 
       - name: Add upstream repository
         run: |
-          git remote add upstream https://github.com/original-owner/original-repo.git
+          git remote add upstream https://github.com/hacksider/Deep-Live-Cam.git
 
       - name: Fetch upstream changes
         run: |
