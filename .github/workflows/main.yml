@@ -30,4 +30,4 @@ jobs:
           TARGET_GIT_USERNAME: ${{ secrets.TARGET_GIT_USERNAME }}
           TARGET_GIT_PASSWORD: ${{ secrets.TARGET_GIT_PASSWORD }}
         run: |
-          git push target main --force-with-lease
+          git push target main --force
