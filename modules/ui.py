@@ -4,13 +4,18 @@ import customtkinter as ctk
 from typing import Callable, Tuple
 import cv2
 from cv2_enumerate_cameras import enumerate_cameras  # Add this import
+from modules.gpu_processing import gpu_cvt_color, gpu_resize, gpu_flip
 from PIL import Image, ImageOps
 import time
 import json
+import queue
+import threading
+import numpy as np
 import modules.globals
 import modules.metadata
 from modules.face_analyser import (
     get_one_face,
+    get_many_faces,
     get_unique_faces_from_target_image,
     get_unique_faces_from_target_video,
     add_blank_map,
@@ -542,7 +547,7 @@ def create_source_target_popup(
         )
         x_label.grid(row=id, column=2, padx=10, pady=10)
 
-        image = Image.fromarray(cv2.cvtColor(item["target"]["cv2"], cv2.COLOR_BGR2RGB))
+        image = Image.fromarray(gpu_cvt_color(item["target"]["cv2"], cv2.COLOR_BGR2RGB))
         image = image.resize(
             (MAPPER_PREVIEW_MAX_WIDTH, MAPPER_PREVIEW_MAX_HEIGHT), Image.LANCZOS
         )
@@ -597,7 +602,7 @@ def update_popup_source(
             }
 
             image = Image.fromarray(
-                cv2.cvtColor(map[button_num]["source"]["cv2"], cv2.COLOR_BGR2RGB)
+                gpu_cvt_color(map[button_num]["source"]["cv2"], cv2.COLOR_BGR2RGB)
             )
             image = image.resize(
                 (MAPPER_PREVIEW_MAX_WIDTH, MAPPER_PREVIEW_MAX_HEIGHT), Image.LANCZOS
@@ -790,7 +795,7 @@ def fit_image_to_size(image, width: int, height: int):
         ratio_w = width / w
     ratio = max(ratio_w, ratio_h)
     new_size = (int(ratio * w), int(ratio * h))
-    return cv2.resize(image, dsize=new_size)
+    return gpu_resize(image, dsize=new_size)
 
 
 def render_image_preview(image_path: str, size: Tuple[int, int]) -> ctk.CTkImage:
@@ -808,7 +813,7 @@ def render_video_preview(
         capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
     has_frame, frame = capture.read()
     if has_frame:
-        image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        image = Image.fromarray(gpu_cvt_color(frame, cv2.COLOR_BGR2RGB))
         if size:
             image = ImageOps.fit(image, size, Image.LANCZOS)
         return ctk.CTkImage(image, size=image.size)
@@ -846,7 +851,7 @@ def update_preview(frame_number: int = 0) -> None:
             temp_frame = frame_processor.process_frame(
                 get_one_face(cv2.imread(modules.globals.source_path)), temp_frame
             )
-        image = Image.fromarray(cv2.cvtColor(temp_frame, cv2.COLOR_BGR2RGB))
+        image = Image.fromarray(gpu_cvt_color(temp_frame, cv2.COLOR_BGR2RGB))
         image = ImageOps.contain(
             image, (PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT), Image.LANCZOS
         )
@@ -947,52 +952,97 @@ def get_available_cameras():
         return camera_indices, camera_names
 
 
-def create_webcam_preview(camera_index: int):
-    global preview_label, PREVIEW
+def _capture_thread_func(cap, capture_queue, stop_event):
+    """Capture thread: reads frames from camera and puts them into the queue.
+    Drops frames when the queue is full to avoid backpressure on the camera."""
+    while not stop_event.is_set():
+        ret, frame = cap.read()
+        if not ret:
+            stop_event.set()
+            break
+        try:
+            capture_queue.put_nowait(frame)
+        except queue.Full:
+            # Drop the oldest frame and enqueue the new one
+            try:
+                capture_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                capture_queue.put_nowait(frame)
+            except queue.Full:
+                pass
 
-    cap = VideoCapturer(camera_index)
-    if not cap.start(PREVIEW_DEFAULT_WIDTH, PREVIEW_DEFAULT_HEIGHT, 60):
-        update_status("Failed to start camera")
-        return
 
-    preview_label.configure(width=PREVIEW_DEFAULT_WIDTH, height=PREVIEW_DEFAULT_HEIGHT)
-    PREVIEW.deiconify()
+# How often to run full face detection. On intermediate frames the last
+# detected face positions are reused, which significantly reduces the
+# per-frame cost of the processing thread.
+DETECT_EVERY_N = 2
 
+
+def _processing_thread_func(capture_queue, processed_queue, stop_event):
+    """Processing thread: takes raw frames from capture_queue, applies face
+    processing, and puts results into processed_queue. Drops processed frames
+    when the output queue is full so the UI always gets the latest result.
+
+    Uses DETECT_EVERY_N to skip expensive face detection on intermediate
+    frames, reusing cached face positions instead."""
     frame_processors = get_frame_processors_modules(modules.globals.frame_processors)
     source_image = None
     prev_time = time.time()
     fps_update_interval = 0.5
     frame_count = 0
     fps = 0
+    proc_frame_index = 0
+    cached_target_face = None  # cached single-face result
+    cached_many_faces = None   # cached many-faces result
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    while not stop_event.is_set():
+        try:
+            frame = capture_queue.get(timeout=0.05)
+        except queue.Empty:
+            continue
 
         temp_frame = frame.copy()
+        run_detection = (proc_frame_index % DETECT_EVERY_N == 0)
+        proc_frame_index += 1
 
         if modules.globals.live_mirror:
-            temp_frame = cv2.flip(temp_frame, 1)
-
-        if modules.globals.live_resizable:
-            temp_frame = fit_image_to_size(
-                temp_frame, PREVIEW.winfo_width(), PREVIEW.winfo_height()
-            )
-
-        else:
-            temp_frame = fit_image_to_size(
-                temp_frame, PREVIEW.winfo_width(), PREVIEW.winfo_height()
-            )
+            temp_frame = gpu_flip(temp_frame, 1)
 
         if not modules.globals.map_faces:
             if source_image is None and modules.globals.source_path:
                 source_image = get_one_face(cv2.imread(modules.globals.source_path))
 
+            # Update face detection cache on detection frames
+            if run_detection or (cached_target_face is None and cached_many_faces is None):
+                if modules.globals.many_faces:
+                    cached_many_faces = get_many_faces(temp_frame)
+                    cached_target_face = None
+                else:
+                    cached_target_face = get_one_face(temp_frame)
+                    cached_many_faces = None
+
             for frame_processor in frame_processors:
                 if frame_processor.NAME == "DLC.FACE-ENHANCER":
                     if modules.globals.fp_ui["face_enhancer"]:
                         temp_frame = frame_processor.process_frame(None, temp_frame)
+                elif frame_processor.NAME == "DLC.FACE-SWAPPER":
+                    # Use cached face positions to skip redundant detection
+                    swapped_bboxes = []
+                    if modules.globals.many_faces and cached_many_faces:
+                        result = temp_frame.copy()
+                        for t_face in cached_many_faces:
+                            result = frame_processor.swap_face(source_image, t_face, result)
+                            if hasattr(t_face, 'bbox') and t_face.bbox is not None:
+                                swapped_bboxes.append(t_face.bbox.astype(int))
+                        temp_frame = result
+                    elif cached_target_face is not None:
+                        temp_frame = frame_processor.swap_face(source_image, cached_target_face, temp_frame)
+                        if hasattr(cached_target_face, 'bbox') and cached_target_face.bbox is not None:
+                            swapped_bboxes.append(cached_target_face.bbox.astype(int))
+                    # Apply post-processing (sharpening, interpolation)
+                    temp_frame = frame_processor.apply_post_processing(temp_frame, swapped_bboxes)
                 else:
                     temp_frame = frame_processor.process_frame(source_image, temp_frame)
         else:
@@ -1023,7 +1073,71 @@ def create_webcam_preview(camera_index: int):
                 2,
             )
 
-        image = cv2.cvtColor(temp_frame, cv2.COLOR_BGR2RGB)
+        # Put processed frame into output queue, dropping old frames if full
+        try:
+            processed_queue.put_nowait(temp_frame)
+        except queue.Full:
+            try:
+                processed_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                processed_queue.put_nowait(temp_frame)
+            except queue.Full:
+                pass
+
+
+def create_webcam_preview(camera_index: int):
+    global preview_label, PREVIEW
+
+    cap = VideoCapturer(camera_index)
+    if not cap.start(PREVIEW_DEFAULT_WIDTH, PREVIEW_DEFAULT_HEIGHT, 60):
+        update_status("Failed to start camera")
+        return
+
+    preview_label.configure(width=PREVIEW_DEFAULT_WIDTH, height=PREVIEW_DEFAULT_HEIGHT)
+    PREVIEW.deiconify()
+
+    # Queues for decoupling capture from processing and processing from display.
+    # Small maxsize ensures we always work on recent frames and drop stale ones.
+    capture_queue = queue.Queue(maxsize=2)
+    processed_queue = queue.Queue(maxsize=2)
+    stop_event = threading.Event()
+
+    # Start capture thread
+    cap_thread = threading.Thread(
+        target=_capture_thread_func,
+        args=(cap, capture_queue, stop_event),
+        daemon=True,
+    )
+    cap_thread.start()
+
+    # Start processing thread
+    proc_thread = threading.Thread(
+        target=_processing_thread_func,
+        args=(capture_queue, processed_queue, stop_event),
+        daemon=True,
+    )
+    proc_thread.start()
+
+    # Main (UI) thread: pull processed frames and update the display
+    while not stop_event.is_set():
+        try:
+            temp_frame = processed_queue.get(timeout=0.03)
+        except queue.Empty:
+            ROOT.update()
+            continue
+
+        if modules.globals.live_resizable:
+            temp_frame = fit_image_to_size(
+                temp_frame, PREVIEW.winfo_width(), PREVIEW.winfo_height()
+            )
+        else:
+            temp_frame = fit_image_to_size(
+                temp_frame, PREVIEW.winfo_width(), PREVIEW.winfo_height()
+            )
+
+        image = gpu_cvt_color(temp_frame, cv2.COLOR_BGR2RGB)
         image = Image.fromarray(image)
         image = ImageOps.contain(
             image, (temp_frame.shape[1], temp_frame.shape[0]), Image.LANCZOS
@@ -1035,6 +1149,10 @@ def create_webcam_preview(camera_index: int):
         if PREVIEW.state() == "withdrawn":
             break
 
+    # Signal threads to stop and wait for them
+    stop_event.set()
+    cap_thread.join(timeout=2.0)
+    proc_thread.join(timeout=2.0)
     cap.release()
     PREVIEW.withdraw()
 
@@ -1146,7 +1264,7 @@ def refresh_data(map: list):
 
         if "source" in item:
             image = Image.fromarray(
-                cv2.cvtColor(item["source"]["cv2"], cv2.COLOR_BGR2RGB)
+                gpu_cvt_color(item["source"]["cv2"], cv2.COLOR_BGR2RGB)
             )
             image = image.resize(
                 (MAPPER_PREVIEW_MAX_WIDTH, MAPPER_PREVIEW_MAX_HEIGHT), Image.LANCZOS
@@ -1164,7 +1282,7 @@ def refresh_data(map: list):
 
         if "target" in item:
             image = Image.fromarray(
-                cv2.cvtColor(item["target"]["cv2"], cv2.COLOR_BGR2RGB)
+                gpu_cvt_color(item["target"]["cv2"], cv2.COLOR_BGR2RGB)
             )
             image = image.resize(
                 (MAPPER_PREVIEW_MAX_WIDTH, MAPPER_PREVIEW_MAX_HEIGHT), Image.LANCZOS
@@ -1212,7 +1330,7 @@ def update_webcam_source(
             }
 
             image = Image.fromarray(
-                cv2.cvtColor(map[button_num]["source"]["cv2"], cv2.COLOR_BGR2RGB)
+                gpu_cvt_color(map[button_num]["source"]["cv2"], cv2.COLOR_BGR2RGB)
             )
             image = image.resize(
                 (MAPPER_PREVIEW_MAX_WIDTH, MAPPER_PREVIEW_MAX_HEIGHT), Image.LANCZOS
@@ -1264,7 +1382,7 @@ def update_webcam_target(
             }
 
             image = Image.fromarray(
-                cv2.cvtColor(map[button_num]["target"]["cv2"], cv2.COLOR_BGR2RGB)
+                gpu_cvt_color(map[button_num]["target"]["cv2"], cv2.COLOR_BGR2RGB)
             )
             image = image.resize(
                 (MAPPER_PREVIEW_MAX_WIDTH, MAPPER_PREVIEW_MAX_HEIGHT), Image.LANCZOS
