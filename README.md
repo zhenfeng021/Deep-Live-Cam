@@ -1,4 +1,4 @@
-<h1 align="center">Deep-Live-Cam 2.0.3c</h1>
+<h1 align="center">Deep-Live-Cam 2.0.5c</h1>
 
 <p align="center">
   Real-time face swap and video deepfake with a single click and only a single image.
@@ -124,7 +124,7 @@ cd Deep-Live-Cam
 
 **3. Download the Models**
 
-1. [GFPGANv1.4](https://huggingface.co/hacksider/deep-live-cam/resolve/main/GFPGANv1.4.pth)
+1. [GFPGANv1.4](https://huggingface.co/hacksider/deep-live-cam/resolve/main/GFPGANv1.4.onnx)
 2. [inswapper\_128\_fp16.onnx](https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx)
 
 Place these files in the "**models**" folder.
@@ -368,6 +368,7 @@ Looking for a CLI mode? Using the -s/--source argument will make the run program
 -   [vic4key](https://github.com/vic4key): For supporting/contributing to this project
 -   [kier007](https://github.com/kier007): for improving the user experience
 -   [qitianai](https://github.com/qitianai): for multi-lingual support
+-   [laurigates](https://github.com/laurigates): Decoupling stuffs to make everything faster!
 -   and [all developers](https://github.com/hacksider/Deep-Live-Cam/graphs/contributors) behind libraries used in this project.
 -   Footnote: Please be informed that the base author of the code is [s0md3v](https://github.com/s0md3v/roop)
 -   All the wonderful users who helped make this project go viral by starring the repo ❤️

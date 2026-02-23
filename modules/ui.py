@@ -38,6 +38,29 @@ import platform
 if platform.system() == "Windows":
     from pygrabber.dshow_graph import FilterGraph
 
+# --- Tk 9.0 compatibility patch ---
+# In Tk 9.0, Menu.index("end") returns "" instead of raising TclError
+# when the menu is empty. CustomTkinter's CTkOptionMenu doesn't handle
+# this, causing crashes. This patch adds the missing guard.
+try:
+    from customtkinter.windows.widgets.core_widget_classes import DropdownMenu as _DropdownMenu
+
+    _original_add_menu_commands = _DropdownMenu._add_menu_commands
+
+    def _patched_add_menu_commands(self, *args, **kwargs):
+        try:
+            end_index = self._menu.index("end")
+            if end_index == "" or end_index is None:
+                return
+        except Exception:
+            pass
+        _original_add_menu_commands(self, *args, **kwargs)
+
+    _DropdownMenu._add_menu_commands = _patched_add_menu_commands
+except (ImportError, AttributeError):
+    pass  # CustomTkinter version doesn't have this class path
+# --- End Tk 9.0 patch ---
+
 ROOT = None
 POPUP = None
 POPUP_LIVE = None
@@ -974,28 +997,48 @@ def _capture_thread_func(cap, capture_queue, stop_event):
                 pass
 
 
-# How often to run full face detection. On intermediate frames the last
-# detected face positions are reused, which significantly reduces the
-# per-frame cost of the processing thread.
-DETECT_EVERY_N = 2
+def _detection_thread_func(latest_frame_holder, detection_result, detection_lock, stop_event):
+    """Detection thread: continuously runs face detection on the latest
+    captured frame and stores results in detection_result under detection_lock.
+
+    This decouples face detection (~15-30ms) from face swapping (~5-10ms)
+    so the swap loop never blocks on detection, significantly improving
+    live mode FPS."""
+    while not stop_event.is_set():
+        with detection_lock:
+            frame = latest_frame_holder[0]
+
+        if frame is None:
+            time.sleep(0.005)
+            continue
+
+        if modules.globals.many_faces:
+            many = get_many_faces(frame)
+            with detection_lock:
+                detection_result['target_face'] = None
+                detection_result['many_faces'] = many
+        else:
+            face = get_one_face(frame)
+            with detection_lock:
+                detection_result['target_face'] = face
+                detection_result['many_faces'] = None
 
 
-def _processing_thread_func(capture_queue, processed_queue, stop_event):
-    """Processing thread: takes raw frames from capture_queue, applies face
-    processing, and puts results into processed_queue. Drops processed frames
-    when the output queue is full so the UI always gets the latest result.
+def _processing_thread_func(capture_queue, processed_queue, stop_event,
+                             latest_frame_holder, detection_result, detection_lock):
+    """Processing thread: takes raw frames from capture_queue, reads the
+    latest detection result from the shared detection_result dict, applies
+    face swap/enhancement, and puts results into processed_queue.
 
-    Uses DETECT_EVERY_N to skip expensive face detection on intermediate
-    frames, reusing cached face positions instead."""
+    Face detection runs concurrently in _detection_thread_func — this thread
+    only reads cached results so it never blocks on detection."""
     frame_processors = get_frame_processors_modules(modules.globals.frame_processors)
     source_image = None
+    last_source_path = None
     prev_time = time.time()
     fps_update_interval = 0.5
     frame_count = 0
     fps = 0
-    proc_frame_index = 0
-    cached_target_face = None  # cached single-face result
-    cached_many_faces = None   # cached many-faces result
 
     while not stop_event.is_set():
         try:
@@ -1003,32 +1046,31 @@ def _processing_thread_func(capture_queue, processed_queue, stop_event):
         except queue.Empty:
             continue
 
-        temp_frame = frame.copy()
-        run_detection = (proc_frame_index % DETECT_EVERY_N == 0)
-        proc_frame_index += 1
+        temp_frame = frame
 
         if modules.globals.live_mirror:
             temp_frame = gpu_flip(temp_frame, 1)
 
+        # Publish the mirrored frame for the detection thread to pick up
+        with detection_lock:
+            latest_frame_holder[0] = temp_frame
+
         if not modules.globals.map_faces:
-            if source_image is None and modules.globals.source_path:
+            if modules.globals.source_path and modules.globals.source_path != last_source_path:
+                last_source_path = modules.globals.source_path
                 source_image = get_one_face(cv2.imread(modules.globals.source_path))
 
-            # Update face detection cache on detection frames
-            if run_detection or (cached_target_face is None and cached_many_faces is None):
-                if modules.globals.many_faces:
-                    cached_many_faces = get_many_faces(temp_frame)
-                    cached_target_face = None
-                else:
-                    cached_target_face = get_one_face(temp_frame)
-                    cached_many_faces = None
+            # Read latest detection results (brief lock to avoid blocking detection thread)
+            with detection_lock:
+                cached_target_face = detection_result.get('target_face')
+                cached_many_faces = detection_result.get('many_faces')
 
             for frame_processor in frame_processors:
                 if frame_processor.NAME == "DLC.FACE-ENHANCER":
                     if modules.globals.fp_ui["face_enhancer"]:
                         temp_frame = frame_processor.process_frame(None, temp_frame)
                 elif frame_processor.NAME == "DLC.FACE-SWAPPER":
-                    # Use cached face positions to skip redundant detection
+                    # Use cached face positions from detection thread
                     swapped_bboxes = []
                     if modules.globals.many_faces and cached_many_faces:
                         result = temp_frame.copy()
@@ -1104,6 +1146,14 @@ def create_webcam_preview(camera_index: int):
     processed_queue = queue.Queue(maxsize=2)
     stop_event = threading.Event()
 
+    # Shared state for the detection pipeline.
+    # latest_frame_holder[0] is the most recent raw frame for the detection
+    # thread; detection_result holds the last detected faces for the
+    # processing thread to read.  Both are guarded by detection_lock.
+    detection_lock = threading.Lock()
+    latest_frame_holder = [None]
+    detection_result = {'target_face': None, 'many_faces': None}
+
     # Start capture thread
     cap_thread = threading.Thread(
         target=_capture_thread_func,
@@ -1112,21 +1162,45 @@ def create_webcam_preview(camera_index: int):
     )
     cap_thread.start()
 
+    # Start detection thread — runs face detection asynchronously so the
+    # processing/swap thread never blocks on it
+    det_thread = threading.Thread(
+        target=_detection_thread_func,
+        args=(latest_frame_holder, detection_result, detection_lock, stop_event),
+        daemon=True,
+    )
+    det_thread.start()
+
     # Start processing thread
     proc_thread = threading.Thread(
         target=_processing_thread_func,
-        args=(capture_queue, processed_queue, stop_event),
+        args=(capture_queue, processed_queue, stop_event,
+              latest_frame_holder, detection_result, detection_lock),
         daemon=True,
     )
     proc_thread.start()
 
-    # Main (UI) thread: pull processed frames and update the display
-    while not stop_event.is_set():
+    # Cleanup helper called from the display loop when preview closes
+    def _cleanup():
+        stop_event.set()
+        cap_thread.join(timeout=2.0)
+        det_thread.join(timeout=2.0)
+        proc_thread.join(timeout=2.0)
+        cap.release()
+        PREVIEW.withdraw()
+
+    # Non-blocking display loop using ROOT.after() — avoids blocking the
+    # Tk event loop which could cause UI freezes or re-entrancy issues
+    def _display_next_frame():
+        if stop_event.is_set() or PREVIEW.state() == "withdrawn":
+            _cleanup()
+            return
+
         try:
-            temp_frame = processed_queue.get(timeout=0.03)
+            temp_frame = processed_queue.get_nowait()
         except queue.Empty:
-            ROOT.update()
-            continue
+            ROOT.after(16, _display_next_frame)
+            return
 
         if modules.globals.live_resizable:
             temp_frame = fit_image_to_size(
@@ -1144,17 +1218,11 @@ def create_webcam_preview(camera_index: int):
         )
         image = ctk.CTkImage(image, size=image.size)
         preview_label.configure(image=image)
-        ROOT.update()
 
-        if PREVIEW.state() == "withdrawn":
-            break
+        ROOT.after(16, _display_next_frame)
 
-    # Signal threads to stop and wait for them
-    stop_event.set()
-    cap_thread.join(timeout=2.0)
-    proc_thread.join(timeout=2.0)
-    cap.release()
-    PREVIEW.withdraw()
+    # Kick off the non-blocking display loop
+    ROOT.after(0, _display_next_frame)
 
 
 def create_source_target_popup_for_webcam(

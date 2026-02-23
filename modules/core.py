@@ -11,7 +11,11 @@ import platform
 import signal
 import shutil
 import argparse
-import torch
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 import onnxruntime
 import tensorflow
 
@@ -21,11 +25,12 @@ import modules.ui as ui
 from modules.processors.frame.core import get_frame_processors_modules
 from modules.utilities import has_image_extension, is_image, is_video, detect_fps, create_video, extract_frames, get_temp_frame_paths, restore_audio, create_temp, move_temp, clean_temp, normalize_output_path
 
-if 'ROCMExecutionProvider' in modules.globals.execution_providers:
+if HAS_TORCH and 'ROCMExecutionProvider' in modules.globals.execution_providers:
     del torch
 
 warnings.filterwarnings('ignore', category=FutureWarning, module='insightface')
-warnings.filterwarnings('ignore', category=UserWarning, module='torchvision')
+if HAS_TORCH:
+    warnings.filterwarnings('ignore', category=UserWarning, module='torchvision')
 
 
 def parse_args() -> None:
@@ -167,7 +172,7 @@ def limit_resources() -> None:
 
 
 def release_resources() -> None:
-    if 'CUDAExecutionProvider' in modules.globals.execution_providers:
+    if 'CUDAExecutionProvider' in modules.globals.execution_providers and HAS_TORCH:
         torch.cuda.empty_cache()
 
 
