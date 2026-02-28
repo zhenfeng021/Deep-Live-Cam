@@ -31,6 +31,7 @@ from modules.utilities import (
 )
 from modules.video_capture import VideoCapturer
 from modules.gettext import LanguageManager
+from modules.ui_tooltip import ToolTip
 from modules import globals
 import platform
 
@@ -191,11 +192,13 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         root, text=_("Select a face"), cursor="hand2", command=lambda: select_source_path()
     )
     select_face_button.place(relx=0.1, rely=0.30, relwidth=0.3, relheight=0.1)
+    ToolTip(select_face_button, _("Choose the source face image to swap onto the target"))
 
     swap_faces_button = ctk.CTkButton(
         root, text="↔", cursor="hand2", command=lambda: swap_faces_paths()
     )
     swap_faces_button.place(relx=0.45, rely=0.30, relwidth=0.1, relheight=0.1)
+    ToolTip(swap_faces_button, _("Swap source and target images"))
 
     select_target_button = ctk.CTkButton(
         root,
@@ -204,6 +207,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         command=lambda: select_target_path(),
     )
     select_target_button.place(relx=0.6, rely=0.30, relwidth=0.3, relheight=0.1)
+    ToolTip(select_target_button, _("Choose the target image or video to apply face swap to"))
 
     keep_fps_value = ctk.BooleanVar(value=modules.globals.keep_fps)
     keep_fps_checkbox = ctk.CTkSwitch(
@@ -217,6 +221,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     keep_fps_checkbox.place(relx=0.1, rely=0.5)
+    ToolTip(keep_fps_checkbox, _("Output video keeps the original frame rate"))
 
     keep_frames_value = ctk.BooleanVar(value=modules.globals.keep_frames)
     keep_frames_switch = ctk.CTkSwitch(
@@ -230,6 +235,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     keep_frames_switch.place(relx=0.1, rely=0.55)
+    ToolTip(keep_frames_switch, _("Keep extracted frames on disk after processing"))
 
     enhancer_value = ctk.BooleanVar(value=modules.globals.fp_ui["face_enhancer"])
     enhancer_switch = ctk.CTkSwitch(
@@ -243,6 +249,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     enhancer_switch.place(relx=0.1, rely=0.6)
+    ToolTip(enhancer_switch, _("Improve face quality using the GFPGAN restoration model"))
 
     gpen256_value = ctk.BooleanVar(value=modules.globals.fp_ui.get("face_enhancer_gpen256", False))
     gpen256_switch = ctk.CTkSwitch(
@@ -256,6 +263,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     gpen256_switch.place(relx=0.1, rely=0.65)
+    ToolTip(gpen256_switch, _("Use GPEN face enhancement model at 256px resolution (faster)"))
 
     gpen512_value = ctk.BooleanVar(value=modules.globals.fp_ui.get("face_enhancer_gpen512", False))
     gpen512_switch = ctk.CTkSwitch(
@@ -269,6 +277,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     gpen512_switch.place(relx=0.1, rely=0.7)
+    ToolTip(gpen512_switch, _("Use GPEN face enhancement model at 512px resolution (higher quality)"))
 
     keep_audio_value = ctk.BooleanVar(value=modules.globals.keep_audio)
     keep_audio_switch = ctk.CTkSwitch(
@@ -282,6 +291,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     keep_audio_switch.place(relx=0.6, rely=0.5)
+    ToolTip(keep_audio_switch, _("Copy audio track from the source video to output"))
 
     many_faces_value = ctk.BooleanVar(value=modules.globals.many_faces)
     many_faces_switch = ctk.CTkSwitch(
@@ -295,6 +305,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     many_faces_switch.place(relx=0.6, rely=0.55)
+    ToolTip(many_faces_switch, _("Swap every detected face, not just the primary one"))
 
     color_correction_value = ctk.BooleanVar(value=modules.globals.color_correction)
     color_correction_switch = ctk.CTkSwitch(
@@ -308,6 +319,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     color_correction_switch.place(relx=0.6, rely=0.6)
+    ToolTip(color_correction_switch, _("Fix blue/green color cast from some webcams"))
 
     #    nsfw_value = ctk.BooleanVar(value=modules.globals.nsfw_filter)
     #    nsfw_switch = ctk.CTkSwitch(root, text='NSFW filter', variable=nsfw_value, cursor='hand2', command=lambda: setattr(modules.globals, 'nsfw_filter', nsfw_value.get()))
@@ -326,6 +338,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     map_faces_switch.place(relx=0.1, rely=0.75)
+    ToolTip(map_faces_switch, _("Manually assign which source face maps to which target face"))
 
     poisson_blend_value = ctk.BooleanVar(value=modules.globals.poisson_blend)
     poisson_blend_switch = ctk.CTkSwitch(
@@ -339,6 +352,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     poisson_blend_switch.place(relx=0.1, rely=0.8)
+    ToolTip(poisson_blend_switch, _("Blend face edges smoothly using Poisson blending"))
 
     show_fps_value = ctk.BooleanVar(value=modules.globals.show_fps)
     show_fps_switch = ctk.CTkSwitch(
@@ -352,6 +366,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     show_fps_switch.place(relx=0.6, rely=0.65)
+    ToolTip(show_fps_switch, _("Display frames-per-second counter on the live preview"))
 
     mouth_mask_var = ctk.BooleanVar(value=modules.globals.mouth_mask)
     mouth_mask_switch = ctk.CTkSwitch(
@@ -362,6 +377,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         command=lambda: setattr(modules.globals, "mouth_mask", mouth_mask_var.get()),
     )
     mouth_mask_switch.place(relx=0.1, rely=0.45)
+    ToolTip(mouth_mask_switch, _("Preserve original mouth movement in the swapped face"))
 
     show_mouth_mask_box_var = ctk.BooleanVar(value=modules.globals.show_mouth_mask_box)
     show_mouth_mask_box_switch = ctk.CTkSwitch(
@@ -374,21 +390,25 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     show_mouth_mask_box_switch.place(relx=0.6, rely=0.45)
+    ToolTip(show_mouth_mask_box_switch, _("Display the mouth mask boundary for debugging"))
 
     start_button = ctk.CTkButton(
         root, text=_("Start"), cursor="hand2", command=lambda: analyze_target(start, root)
     )
     start_button.place(relx=0.15, rely=0.86, relwidth=0.2, relheight=0.05)
+    ToolTip(start_button, _("Begin processing the target image/video with selected face"))
 
     stop_button = ctk.CTkButton(
         root, text=_("Destroy"), cursor="hand2", command=lambda: destroy()
     )
     stop_button.place(relx=0.4, rely=0.86, relwidth=0.2, relheight=0.05)
+    ToolTip(stop_button, _("Stop processing and close the application"))
 
     preview_button = ctk.CTkButton(
         root, text=_("Preview"), cursor="hand2", command=lambda: toggle_preview()
     )
     preview_button.place(relx=0.65, rely=0.86, relwidth=0.2, relheight=0.05)
+    ToolTip(preview_button, _("Show/hide a preview of the processed output"))
 
     # --- Camera Selection ---
     camera_label = ctk.CTkLabel(root, text=_("Select Camera:"))
@@ -412,6 +432,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         )
 
     camera_optionmenu.place(relx=0.35, rely=0.92, relwidth=0.25, relheight=0.05)
+    ToolTip(camera_optionmenu, _("Select which camera to use for live mode"))
 
     live_button = ctk.CTkButton(
         root,
@@ -432,6 +453,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         ),
     )
     live_button.place(relx=0.65, rely=0.92, relwidth=0.2, relheight=0.05)
+    ToolTip(live_button, _("Start real-time face swap using webcam"))
     # --- End Camera Selection ---
 
     # 1) Define a DoubleVar for transparency (0 = fully transparent, 1 = fully opaque)
@@ -472,6 +494,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         corner_radius=3,
     )
     transparency_slider.place(relx=0.35, rely=0.77, relwidth=0.5, relheight=0.02)
+    ToolTip(transparency_slider, _("Blend between original and swapped face (0% = original, 100% = fully swapped)"))
 
     # 3) Sharpness label & slider
     sharpness_var = ctk.DoubleVar(value=0.0)  # start at 0.0
@@ -497,6 +520,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         corner_radius=3,
     )
     sharpness_slider.place(relx=0.35, rely=0.82, relwidth=0.5, relheight=0.02)
+    ToolTip(sharpness_slider, _("Sharpen the enhanced face output"))
 
     # Status and link at the bottom
     global status_label
