@@ -1,4 +1,4 @@
-<h1 align="center">Deep-Live-Cam 2.0.5c</h1>
+<h1 align="center">Deep-Live-Cam 2.1 😊</h1>
 
 <p align="center">
   Real-time face swap and video deepfake with a single click and only a single image.
@@ -308,6 +308,9 @@ python run.py --execution-provider openvino
 -   Wait for the preview to appear (10-30 seconds).
 -   Use a screen capture tool like OBS to stream.
 -   To change the face, select a new source image.
+
+## Download all models in this huggingface link
+- [**Download models here**](https://huggingface.co/hacksider/deep-live-cam/tree/main)
 
 ## Command Line Arguments (Unmaintained)
 
