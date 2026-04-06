@@ -54,11 +54,11 @@ def pre_check() -> bool:
         logging.error(f"Failed to create directory {download_directory_path} due to permission error: {e}")
         return False
     
-    # Use the direct download URL from Hugging Face
+    # Use the direct download URL from Hugging Face (FP32 model for broad GPU compatibility)
     conditional_download(
         download_directory_path,
         [
-            "https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx"
+            "https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128.onnx"
         ],
     )
     return True
@@ -85,9 +85,9 @@ def get_face_swapper() -> Any:
 
     with THREAD_LOCK:
         if FACE_SWAPPER is None:
+            # Use FP32 model by default for broad GPU compatibility.
+            # FP16 can produce NaN on GPUs without Tensor Cores (e.g. GTX 16xx).
             model_name = "inswapper_128.onnx"
-            if "CUDAExecutionProvider" in modules.globals.execution_providers:
-                model_name = "inswapper_128_fp16.onnx"
             model_path = os.path.join(models_dir, model_name)
             update_status(f"Loading face swapper model from: {model_path}", NAME)
             try:
@@ -106,6 +106,14 @@ def get_face_swapper() -> Any:
                                 "EnableOnSubgraphs": 1,
                                 "RequireStaticShapes": 0,
                                 "MaximumCacheSize": 1024 * 1024 * 512,  # 512MB cache
+                            }
+                        ))
+                    elif p == "CUDAExecutionProvider":
+                        providers_config.append((
+                            "CUDAExecutionProvider",
+                            {
+                                "arena_extend_strategy": "kSameAsRequested",
+                                "cudnn_conv_algo_search": "DEFAULT",
                             }
                         ))
                     else:
