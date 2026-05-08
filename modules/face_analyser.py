@@ -138,12 +138,13 @@ def _analyse_faces(frame: Frame) -> list:
     return faces
 
 
-def get_one_face(frame: Frame) -> Any:
-    if _is_dml():
-        with modules.globals.dml_lock:
+def get_one_face(frame: Frame, faces: Any = None) -> Any:
+    if faces is None:
+        if _is_dml():
+            with modules.globals.dml_lock:
+                faces = _analyse_faces(frame)
+        else:
             faces = _analyse_faces(frame)
-    else:
-        faces = _analyse_faces(frame)
     try:
         return min(faces, key=lambda x: x.bbox[0])
     except ValueError:
