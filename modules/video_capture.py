@@ -38,19 +38,35 @@ class VideoCapturer:
         """Initialize and start video capture"""
         try:
             if platform.system() == "Windows":
-                # Windows-specific capture methods.
-                # MSMF (Media Foundation) is preferred — DirectShow often
-                # caps at 30fps even when the camera supports 60fps.
+                # device_index comes from pygrabber.FilterGraph (DirectShow
+                # enumeration), so open with DSHOW first to preserve mapping.
+                # MSMF and DirectShow enumerate cameras in different orders, so
+                # opening MSMF with a DSHOW index silently selects the wrong
+                # camera. MSMF/ANY remain as fallbacks for cameras DSHOW can't
+                # open.
+                #
+                # Pass codec + resolution + fps as construction params (OpenCV
+                # 4.6+). DSHOW locks the pixel format at open time and ignores
+                # later cap.set(CAP_PROP_FOURCC, ...) — without this, DSHOW
+                # falls back to uncompressed YUYV at 1080p, which is USB-
+                # bandwidth-limited to ~5 fps. Setting MJPG at construction
+                # negotiates compressed frames from the first read.
+                mjpg = cv2.VideoWriter_fourcc(*'MJPG')
+                open_params = [
+                    cv2.CAP_PROP_FOURCC, mjpg,
+                    cv2.CAP_PROP_FRAME_WIDTH, width,
+                    cv2.CAP_PROP_FRAME_HEIGHT, height,
+                    cv2.CAP_PROP_FPS, fps,
+                ]
                 capture_methods = [
-                    (self.device_index, cv2.CAP_MSMF),   # Media Foundation first
-                    (self.device_index, cv2.CAP_DSHOW),   # DirectShow fallback
+                    (self.device_index, cv2.CAP_DSHOW),
+                    (self.device_index, cv2.CAP_MSMF),
                     (self.device_index, cv2.CAP_ANY),
-                    (0, cv2.CAP_ANY),
                 ]
 
                 for dev_id, backend in capture_methods:
                     try:
-                        self.cap = cv2.VideoCapture(dev_id, backend)
+                        self.cap = cv2.VideoCapture(dev_id, backend, open_params)
                         if self.cap.isOpened():
                             break
                         self.cap.release()
@@ -63,14 +79,14 @@ class VideoCapturer:
             if not self.cap or not self.cap.isOpened():
                 raise RuntimeError("Failed to open camera")
 
-            # Try MJPEG first — avoids USB bandwidth limits with
-            # uncompressed YUV at high resolutions.  Falls back silently
-            # if the camera/backend doesn't support it.
-            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-            # Request desired resolution and frame rate
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            self.cap.set(cv2.CAP_PROP_FPS, fps)
+            # Belt-and-braces: also set via cap.set() for backends that honor
+            # post-open changes (MSMF, V4L2). DSHOW ignores these, but the
+            # construction params above already handled it.
+            if platform.system() != "Windows":
+                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                self.cap.set(cv2.CAP_PROP_FPS, fps)
 
             # Read back resolution (usually reliable)
             self.actual_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))

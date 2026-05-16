@@ -59,7 +59,7 @@ def camera_backends() -> List[Tuple[int, int]]:
 
 
 def accelerator_label() -> str:
-    if HAS_TORCH_CUDA and HAS_CUDA_PROVIDER:
+    if HAS_CUDA_PROVIDER:
         return "CUDA (NVIDIA)"
     if IS_APPLE_SILICON and HAS_COREML_PROVIDER:
         return "CoreML (Apple Neural Engine)"
